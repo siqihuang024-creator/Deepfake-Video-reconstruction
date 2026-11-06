@@ -1,0 +1,34 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Generated manifests, results, and logs
+manifests/*.csv
+results/
+analysis/
+logs/
+*.log
+
+# Datasets and model files
+data/
+dataset/
+MagicVideos/
+CoCoVideo/
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.sif
+*.img
+*.zip
+*.tar
+*.tar.gz
+
+# Local configuration
+.env

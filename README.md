@@ -1,0 +1,126 @@
+# 可预测性探针（Predictability Probe）
+
+**目的**：在训练自己的重构模型之前，先用两个只在真实视频上预训练过的现成模型，验证"真假视频在能否被预测/重构上是否存在稳定差异"。这一步**不训练任何模型**，假视频只用于评估。
+
+| 探针 | 模型 | 测量层面 | 误差 |
+|---|---|---|---|
+| A | V-JEPA 2（torch.hub `facebookresearch/vjepa2`） | 特征层：运动、事件、语义 | 被遮挡 token 的特征 L1 |
+| B | VideoMAE（HF `MCG-NJU/videomae-base`，带解码器的预训练权重） | 像素层：纹理、低层细节 | 被遮挡 tubelet 的像素 MSE |
+
+## 目录
+
+```
+probe/video_io.py      ffprobe 元数据、片段规划、解码（PyAV 优先，没有则用 OpenCV）
+probe/masks.py         遮挡方式：future / tube / block
+probe/preprocess.py    缩放、裁剪（three = 左/中/右三块，覆盖整个 16:9 画面）、复杂度协变量
+probe/backends.py      两个模型后端；保证上下文编码器看不到目标区域（不泄漏答案）
+scripts/build_manifest.py   扫描数据文件夹，生成清单（标签、划分、分辨率/帧率/码率）
+scripts/standardize.py      生成统一格式的副本（24fps、720p、H.264 CRF23），原始文件保留
+scripts/selftest.py         在集群上必须先跑：检查模型加载、loss 是否一致、是否泄漏
+scripts/run_probe.py        主程序：每条视频 × 片段 × 遮挡方式 × 随机种子，输出一行 JSON
+scripts/analyze.py          汇总：按生成器算 AUC 和 95% 置信区间、双尾分数、复杂度校准、捷径检查、画图
+slurm/*.sbatch              提交作业用的脚本
+```
+
+## 一、部署环境（在集群上逐项确认）
+
+```bash
+# 0) 从本机上传代码（Windows PowerShell，需要先打开 WireGuard）
+scp -r "E:\PhD\Deepfake Video reconstruction 2026_11_05\predictability_probe" hefest:/home/shuang/projects/
+
+# 1) 申请一个交互式 GPU 会话
+ssh slurm-datakom
+mkdir -p ~/logs        # 只需做一次：Slurm 在作业启动前就要打开日志文件，目录不存在就拿不到日志
+srun --partition=batch --gres=gpu:1 --cpus-per-task=8 --mem=32G --time=01:00:00 --pty bash
+SIF=/home/containers/pytorch-vision-h200.sif
+
+# 2) 能否联网（下载模型权重需要）
+curl -sI https://huggingface.co | head -1
+curl -sI https://dl.fbaipublicfiles.com | head -1
+curl -sI https://github.com | head -1
+
+# 3) 容器里已经有什么
+apptainer exec $SIF python3 -c "import torch,numpy,sklearn,cv2;print(torch.__version__,numpy.__version__,sklearn.__version__,cv2.__version__)"
+apptainer exec $SIF which ffmpeg ffprobe
+apptainer exec $SIF python3 -c "import transformers" ; apptainer exec $SIF python3 -c "import av"
+
+# 4) 缺的包装进 overlay（注意固定 numpy 版本，避免破坏容器）
+apptainer overlay create --size 10240 ~/overlay.img
+apptainer exec --overlay ~/overlay.img $SIF pip install "numpy==1.26.4" "transformers<5" av matplotlib timm einops
+
+# 5) 如果容器里没有 ffmpeg/ffprobe：下载静态编译版放到 ~/bin，再加到 PATH
+#    （或者在 overlay 里用 conda 或 apt 安装，看集群允许哪种方式）
+```
+
+如果 hefest **不能联网**：在本机下载权重，再用 scp 传到 `/data/checkpoints/shuang/cache/`。V-JEPA 2 用的 torch.hub 需要源码仓库加权重文件；VideoMAE 用 HF 格式的目录，下载后通过 `--model-id /path/to/dir` 指定。
+
+## 二、自检（必须全部 PASS 才能跑全量）
+
+```bash
+cd /home/shuang/projects/predictability_probe
+export HF_HOME=/data/checkpoints/shuang/cache/hf TORCH_HOME=/data/checkpoints/shuang/cache/torch
+apptainer exec --nv --overlay ~/overlay.img:ro -B /data $SIF python3 scripts/selftest.py --backend videomae --video <某个mp4>
+apptainer exec --nv --overlay ~/overlay.img:ro -B /data $SIF python3 scripts/selftest.py --backend vjepa2   --video <某个mp4>
+```
+
+检查项：
+1. 模型能加载，输入尺寸正确；
+2. VideoMAE：自己计算的逐 token 误差和 HF 内部的 loss 一致；
+3. **泄漏检查**：把目标区域的像素换成噪声后，预测结果不应改变；
+4. 把上下文换成噪声后，预测结果应该明显改变；
+5. 单个片段的耗时和显存占用。
+
+**V-JEPA 2 权重（已核实的上游问题，2026-11-06）**：上游 `main` 分支的 `src/hub/backbones.py` 把权重地址写成了 `http://localhost:8300`（官方地址被注释掉了），而且加载时用的是 `strict=False`。所以本代码**只用 hub 来构建网络结构（`pretrained=False`），权重自己下载**：默认从官方地址 `https://dl.fbaipublicfiles.com/vjepa2/vitl.pt`（约 5.1GB）下载，也可以用 `--weights /本地/vitl.pt` 指定本地文件。加载时会检查键名，**缺少权重就直接报错**，避免悄悄用随机初始化的预测器跑完全程。上下文编码器用 checkpoint 里的 `encoder`，目标编码器用 `target_encoder`。
+建议第一次成功后把代码版本固定下来：`--hub-repo facebookresearch/vjepa2:<commit-sha>`。
+
+V-JEPA 2 的 hub 接口是按 `encoder(x, masks=[idx])` 和 `predictor(ctx, ctx_idx, tgt_idx)` 写的。**如果 selftest 报接口不匹配，只需要改 `probe/backends.py` 里的 `VJEPA2Backend.forward`。**故意没用 HF 的 `VJEPA2Model`：它的预测器读取的是编码器在完整片段上的输出，会泄漏目标区域的信息。
+
+## 三、数据清单
+
+```bash
+# Magic Videos（按你的实际目录改；每个文件夹写一个 --spec）
+python3 scripts/build_manifest.py --out manifests/magic_raw.csv \
+  --spec root=/data/datasets/shuang/MagicVideos/real/pexels,label=real,generator=real,dataset=magic,source=pexels \
+  --spec root=/data/datasets/shuang/MagicVideos/real/mixkit,label=real,generator=real,dataset=magic,source=mixkit \
+  --spec root=/data/datasets/shuang/MagicVideos/fake/Wan2.1,label=fake,generator=Wan2.1,dataset=magic \
+  --spec root=/data/datasets/shuang/MagicVideos/fake/Hailuo,label=fake,generator=Hailuo,dataset=magic
+#   ... 其余生成器同样写法
+# 另外下载的、同来源的真实视频（只用来定阈值）： ...,split=calib
+```
+- 真实视频默认按 id 哈希对半分成 calib（定阈值）和 test（测试）；假视频全部放进 test。
+- **有配对关系的数据集（CoCoVideo、Magic Videos）一定要加 `pair=...`**：`pair=stem`（文件名相同的就是一对）、`pair=regex:(clip\d+)`、`pair=csv:映射表.csv`。加了以后会**按对来划分**：真实视频和由它生成的假视频总是在同一边；配对的真实视频进了 calib 的那些假视频不参与评估。具体怎么配对，要等拿到数据、看过文件命名规则再定。
+  - **配对检查**：如果一个 pair_id 对应多条真实视频，或者某个生成器的配对率低于 `--min-pair-rate`（默认 90%），脚本会**直接报错退出**，不生成清单。找不到对应真实视频的假视频没有 pair_id，一律放进 test 参与评估，不会被丢掉。
+  - 脚本会打印每个生成器的配对率，以及 3 组配对示例的路径。**跑探针之前，先人工打开这几组视频确认确实是一对。**
+- 脚本最后会打印**每个生成器的分辨率、帧率、编码器分布**，先看一眼有没有明显的格式差异。
+
+统一格式的版本：`sbatch --export=ALL,MANIFEST=manifests/magic_raw.csv,TAG=magic slurm/standardize.sbatch`，会生成 `manifests/magic_std.csv`，视频输出到 `/data/checkpoints/shuang/std_videos`，因为 `/data/datasets` 是只读挂载。
+
+## 四、运行
+
+```bash
+# 先用 50 条视频试跑（--limit 会在真实视频和各生成器之间均匀抽样，每组约 7 条）
+sbatch --export=ALL,BACKEND=vjepa2,MANIFEST=manifests/magic_raw.csv,TAG=magic_raw_try,EXTRA="--limit 50" slurm/probe.sbatch
+# selftest 没全部通过时会以非零状态退出，可以写成：selftest ... && sbatch ...
+# 全量：2 个模型 × 2 套数据（原始 / 统一格式）
+for B in vjepa2 videomae; do for V in raw std; do
+  sbatch --export=ALL,BACKEND=$B,MANIFEST=manifests/magic_$V.csv,TAG=magic_$V slurm/probe.sbatch
+done; done
+```
+默认参数：16 帧，按 8fps 采样（约 1.9 秒）；每条视频最多 4 个片段；跳过开头 0.5 秒（CoCoVideo 的假视频首帧就是真实视频的首帧）；三块裁剪；随机遮挡用 3 个种子。
+默认遮挡方式：V-JEPA 用 `future,block:0.25`；VideoMAE 用 `tube:0.9,future`。
+**断点续跑**：每条视频的全部结果写完之后，会追加一行"完成标记"。重新启动时，没有完成标记的视频会被清掉、重新计算。结果文件的第一行记录了本次运行的配置；续跑时如果配置不一致（包括 `--no-amp`），程序会直接拒绝。每条视频的完成标记还记录了文件路径和大小；如果同一个 video_id 现在指向另一个文件（比如原始版和统一格式版共用一个输出文件），程序也会拒绝。想换配置或换数据，请用新的 `--out` 文件。往清单里**新增**视频后续跑是允许的。
+
+## 五、分析
+
+```bash
+python3 scripts/analyze.py --results /data/checkpoints/shuang/predictability_probe/results/vjepa2_magic_raw.jsonl \
+    --manifest manifests/magic_raw.csv --out analysis/vjepa2_magic_raw
+```
+输出 `summary.md`、`auc.csv`、`confounds.csv`，以及分布图和时间误差曲线。
+
+**怎么读结果**
+- `high`：假视频更难预测；`low`：假视频更容易预测；`two`：两端都算异常。前缀 `r_` 表示扣除运动量和纹理复杂度之后的版本，**重点看这个**。
+- 先看 `confounds.csv`：如果 bpp（每像素码率）、fps、分辨率这些格式特征单独就能分开真假（>0.8），说明分数可能是借这些格式特征分出来的，要以统一格式版本的结果为准。
+- 原始版和统一格式版的结论方向一致、每个生成器的 AUC 都明显大于 0.5，才算"信号存在"。
+- **有配对时，以 paired win-rate（假视频的分数高于它自己那条真实视频的概率）为准**。不配对的 AUC 明显高于配对胜率时，说明有一部分差异来自生成器所用 prompt 的内容，而不是真假本身。
+- 判断依据是：在多个生成器上方向一致，置信区间不跨 0.5。不要只看 ALL_FAKES 一项：不同生成器的方向可能相反，平均下来会互相抵消。

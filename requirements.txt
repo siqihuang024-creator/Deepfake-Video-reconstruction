@@ -1,0 +1,9 @@
+# Already in /home/containers/pytorch-vision-h200.sif (per cluster guide):
+#   torch 2.5, torchvision, numpy 1.26.4, scikit-learn 1.5.1, opencv-headless
+# Extra packages for this probe (install into an overlay / --user, keep numpy pinned!):
+transformers>=4.40      # VideoMAE backend (VideoMAEForPreTraining)
+av>=11                  # optional: timestamp-accurate decoding (falls back to OpenCV)
+matplotlib              # optional: plots in analyze.py
+timm                    # likely needed by the vjepa2 torch.hub code
+einops                  # likely needed by the vjepa2 torch.hub code
+# System tools: ffmpeg + ffprobe (manifest metadata and standardisation)
