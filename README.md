@@ -30,7 +30,7 @@ slurm/*.sbatch              提交作业用的脚本
 # 1) 从本机登录网关，申请一个交互式 GPU 会话
 ssh slurm-datakom
 mkdir -p ~/logs        # 只需做一次：Slurm 在作业启动前就要打开日志文件，目录不存在就拿不到日志
-srun --partition=batch --gres=gpu:1 --cpus-per-task=8 --mem=32G --time=01:00:00 --pty bash
+srun --partition=batch --gres=gpu:1 --cpus-per-task=8 --mem=32G --time=0 --pty bash
 SIF=/home/containers/pytorch-vision-h200.sif
 
 # 2) 能否联网（下载模型权重需要）

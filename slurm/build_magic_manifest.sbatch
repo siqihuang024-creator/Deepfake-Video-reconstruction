@@ -7,7 +7,7 @@
 #SBATCH --partition=batch
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=8G
-#SBATCH --time=02:00:00
+#SBATCH --time=0
 #SBATCH --output=/home/%u/logs/%x_%j.out
 #SBATCH --error=/home/%u/logs/%x_%j.err
 set -euo pipefail
