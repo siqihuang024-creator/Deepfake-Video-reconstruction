@@ -13,7 +13,7 @@
 #SBATCH --error=/home/%u/logs/%x_%j.err
 set -euo pipefail
 
-PROJ=/home/${USER}/projects/predictability_probe
+PROJ="${PROJ:-/home/${USER}/projects/Deepfake Reconstruction/predictability_probe}"
 SIF=${SIF:-/home/containers/pytorch-vision-h200.sif}
 OVERLAY=${OVERLAY:-/home/${USER}/overlay.img}
 # Standardised videos go to /data/checkpoints (writable); /data/datasets is mounted read-only.
@@ -27,7 +27,7 @@ apptainer exec ${OV_ARG} \
     -B /data/checkpoints/${USER}:/data/checkpoints/${USER} \
     -B /home/${USER}:/home/${USER} \
     "$SIF" \
-    python3 ${PROJ}/scripts/standardize.py \
+    python3 "${PROJ}/scripts/standardize.py" \
         --manifest "${PROJ}/${MANIFEST}" \
         --out-root "${STDROOT}" \
         --out "${PROJ}/manifests/${TAG}_std.csv" \

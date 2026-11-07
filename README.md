@@ -25,11 +25,12 @@ slurm/*.sbatch              提交作业用的脚本
 ## 一、部署环境（在集群上逐项确认）
 
 ```bash
-# 0) 从本机上传代码（Windows PowerShell，需要先打开 WireGuard）
-scp -r "E:\PhD\Deepfake Video reconstruction 2026_11_05\predictability_probe" hefest:/home/shuang/projects/
+# 0) 从本机登录网关，再更新共享 home 上的代码
+ssh slurm-datakom
+cd "/home/shuang/projects/Deepfake Reconstruction/predictability_probe"
+git pull --ff-only origin main
 
 # 1) 申请一个交互式 GPU 会话
-ssh slurm-datakom
 mkdir -p ~/logs        # 只需做一次：Slurm 在作业启动前就要打开日志文件，目录不存在就拿不到日志
 srun --partition=batch --gres=gpu:1 --cpus-per-task=8 --mem=32G --time=01:00:00 --pty bash
 SIF=/home/containers/pytorch-vision-h200.sif
@@ -57,7 +58,7 @@ apptainer exec --overlay ~/overlay.img $SIF pip install "numpy==1.26.4" "transfo
 ## 二、自检（必须全部 PASS 才能跑全量）
 
 ```bash
-cd /home/shuang/projects/predictability_probe
+cd "/home/shuang/projects/Deepfake Reconstruction/predictability_probe"
 export HF_HOME=/data/checkpoints/shuang/cache/hf TORCH_HOME=/data/checkpoints/shuang/cache/torch
 apptainer exec --nv --overlay ~/overlay.img:ro -B /data $SIF python3 scripts/selftest.py --backend videomae --video <某个mp4>
 apptainer exec --nv --overlay ~/overlay.img:ro -B /data $SIF python3 scripts/selftest.py --backend vjepa2   --video <某个mp4>
@@ -78,16 +79,16 @@ V-JEPA 2 的 hub 接口是按 `encoder(x, masks=[idx])` 和 `predictor(ctx, ctx_
 ## 三、数据清单
 
 ```bash
-# Magic Videos（按你的实际目录改；每个文件夹写一个 --spec）
-python3 scripts/build_manifest.py --out manifests/magic_raw.csv \
-  --spec root=/data/datasets/shuang/MagicVideos/real/pexels,label=real,generator=real,dataset=magic,source=pexels \
-  --spec root=/data/datasets/shuang/MagicVideos/real/mixkit,label=real,generator=real,dataset=magic,source=mixkit \
-  --spec root=/data/datasets/shuang/MagicVideos/fake/Wan2.1,label=fake,generator=Wan2.1,dataset=magic \
-  --spec root=/data/datasets/shuang/MagicVideos/fake/Hailuo,label=fake,generator=Hailuo,dataset=magic
-#   ... 其余生成器同样写法
-# 另外下载的、同来源的真实视频（只用来定阈值）： ...,split=calib
+# Hefest 上已确认的 Magic Videos 根目录：/data/datasets/shuang/magic
+# 先查看文件名，确定真实视频与假视频的配对规则，再生成正式清单。
+for d in /data/datasets/shuang/magic/real/* /data/datasets/shuang/magic/fake/*; do
+  echo "=== $d"
+  find "$d" -type f -iname '*.mp4' -print -quit
+done
 ```
-- 真实视频默认按 id 哈希对半分成 calib（定阈值）和 test（测试）；假视频全部放进 test。
+- 清单脚本的每个 `--spec` 对应一个实际子目录。真实视频目录是 `real/real_videos_pexels_720p` 与 `real/real_videos_mixkit_720p`；假视频目录是 `fake/step-video`、`fake/jimeng-S3.0`、`fake/jimeng-S2.0`、`fake/wanx2.1`、`fake/hailuo-T2V-01`、`fake/pexels_wan2.1-T2V-1.3B`。`root=` 必须使用这些实际路径。
+- **先确定 `pair=` 规则并人工核对配对样例，之后再生成 `manifests/magic_raw.csv`。**目录名本身不足以确定配对规则。
+- 真实视频默认按 id 哈希对半分成 calib（定阈值）和 test（测试）；未配对的假视频进 test，已配对的假视频跟随对应真实视频的划分。
 - **有配对关系的数据集（CoCoVideo、Magic Videos）一定要加 `pair=...`**：`pair=stem`（文件名相同的就是一对）、`pair=regex:(clip\d+)`、`pair=csv:映射表.csv`。加了以后会**按对来划分**：真实视频和由它生成的假视频总是在同一边；配对的真实视频进了 calib 的那些假视频不参与评估。具体怎么配对，要等拿到数据、看过文件命名规则再定。
   - **配对检查**：如果一个 pair_id 对应多条真实视频，或者某个生成器的配对率低于 `--min-pair-rate`（默认 90%），脚本会**直接报错退出**，不生成清单。找不到对应真实视频的假视频没有 pair_id，一律放进 test 参与评估，不会被丢掉。
   - 脚本会打印每个生成器的配对率，以及 3 组配对示例的路径。**跑探针之前，先人工打开这几组视频确认确实是一对。**

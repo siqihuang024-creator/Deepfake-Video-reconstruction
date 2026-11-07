@@ -25,8 +25,11 @@ Each --spec describes one folder (comma-separated key=value):
 
 Example
     python scripts/build_manifest.py --out manifests/magic_raw.csv \
-      --spec root=/data/datasets/shuang/MagicVideos/real/pexels,label=real,generator=real,dataset=magic,source=pexels \
-      --spec root=/data/datasets/shuang/MagicVideos/fake/Wan2.1,label=fake,generator=Wan2.1,dataset=magic
+      --spec root=/data/datasets/shuang/magic/real/real_videos_pexels_720p,label=real,generator=real,dataset=magic,source=pexels,pair=stem \
+      --spec root=/data/datasets/shuang/magic/fake/wanx2.1,label=fake,generator=wanx2.1,dataset=magic,pair=stem
+
+    The pair=stem example is only valid if the corresponding file stems really match.
+    Inspect sample file names and verify pairs before running on the full dataset.
 """
 import argparse
 import csv

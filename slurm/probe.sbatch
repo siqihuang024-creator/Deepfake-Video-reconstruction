@@ -15,7 +15,7 @@
 #SBATCH --error=/home/%u/logs/%x_%j.err
 set -euo pipefail
 
-PROJ=/home/${USER}/projects/predictability_probe
+PROJ="${PROJ:-/home/${USER}/projects/Deepfake Reconstruction/predictability_probe}"
 SIF=${SIF:-/home/containers/pytorch-vision-h200.sif}
 OVERLAY=${OVERLAY:-/home/${USER}/overlay.img}          # holds extra pip packages (see README)
 CACHE=/data/checkpoints/${USER}/cache                  # model weights, NOT in /home
@@ -32,7 +32,7 @@ apptainer exec --nv ${OV_ARG} \
     -B /home/${USER}:/home/${USER} \
     --env HF_HOME=${CACHE}/hf,TORCH_HOME=${CACHE}/torch,PYTHONUNBUFFERED=1 \
     "$SIF" \
-    python3 ${PROJ}/scripts/run_probe.py \
+    python3 "${PROJ}/scripts/run_probe.py" \
         --backend "${BACKEND}" \
         --manifest "${PROJ}/${MANIFEST}" \
         --out "${OUTDIR}/${BACKEND}_${TAG}.jsonl" \
