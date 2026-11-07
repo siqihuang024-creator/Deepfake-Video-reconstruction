@@ -26,6 +26,7 @@ apptainer exec ${OV_ARG} \
     -B /data/datasets/${USER}:/data/datasets/${USER}:ro \
     -B /data/checkpoints/${USER}:/data/checkpoints/${USER} \
     -B /home/${USER}:/home/${USER} \
+    --env "PREPEND_PATH=/home/${USER}/bin" \
     "$SIF" \
     python3 "${PROJ}/scripts/standardize.py" \
         --manifest "${PROJ}/${MANIFEST}" \

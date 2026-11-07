@@ -30,7 +30,7 @@ apptainer exec --nv ${OV_ARG} \
     -B /data/datasets/${USER}:/data/datasets/${USER}:ro \
     -B /data/checkpoints/${USER}:/data/checkpoints/${USER} \
     -B /home/${USER}:/home/${USER} \
-    --env HF_HOME=${CACHE}/hf,TORCH_HOME=${CACHE}/torch,PYTHONUNBUFFERED=1 \
+    --env HF_HOME=${CACHE}/hf,TORCH_HOME=${CACHE}/torch,PYTHONUNBUFFERED=1,PREPEND_PATH=/home/${USER}/bin \
     "$SIF" \
     python3 "${PROJ}/scripts/run_probe.py" \
         --backend "${BACKEND}" \

@@ -45,11 +45,13 @@ bind_args=(
 
 # build_manifest.py records ffprobe errors in the CSV, so catch a missing ffprobe
 # before scanning the entire dataset.
-apptainer exec "${overlay_args[@]}" "${bind_args[@]}" "$SIF" \
+apptainer exec "${overlay_args[@]}" "${bind_args[@]}" \
+    --env "PREPEND_PATH=/home/${USER}/bin" "$SIF" \
     sh -c 'command -v ffprobe >/dev/null || { echo "ffprobe is missing in the container" >&2; exit 1; }'
 
 mkdir -p "${PROJ}/manifests"
-apptainer exec "${overlay_args[@]}" "${bind_args[@]}" "$SIF" \
+apptainer exec "${overlay_args[@]}" "${bind_args[@]}" \
+    --env "PREPEND_PATH=/home/${USER}/bin" "$SIF" \
     python3 "${PROJ}/scripts/build_manifest.py" \
     --out "$OUT" \
     --workers "${SLURM_CPUS_PER_TASK:-4}" \

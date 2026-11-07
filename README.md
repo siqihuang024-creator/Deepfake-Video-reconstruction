@@ -47,9 +47,24 @@ apptainer exec $SIF python3 -c "import transformers" ; apptainer exec $SIF pytho
 apptainer overlay create --size 10240 ~/overlay.img
 apptainer exec --overlay ~/overlay.img $SIF pip install "numpy==1.26.4" "transformers<5" av matplotlib timm einops
 
-# 5) 如果容器里没有 ffmpeg/ffprobe：下载静态编译版放到 ~/bin，再加到 PATH
-#    （或者在 overlay 里用 conda 或 apt 安装，看集群允许哪种方式）
+# 5) ffmpeg/ffprobe 为独立可执行文件；见下方安装步骤，不需要 overlay
 ```
+
+Hefest 的宿主机和容器都没有 `ffmpeg` / `ffprobe`。可以把第三方 Linux 静态版放进个人目录，无须 root 或 overlay。在 Hefest 上执行：
+
+```bash
+mkdir -p ~/bin ~/downloads/ffmpeg-static
+cd ~/downloads/ffmpeg-static
+curl -fL -o ffmpeg-release-amd64-static.tar.xz https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
+curl -fL -o ffmpeg-release-amd64-static.tar.xz.md5 https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz.md5
+md5sum -c ffmpeg-release-amd64-static.tar.xz.md5
+# 只有校验显示 OK 后才继续
+tar -xf ffmpeg-release-amd64-static.tar.xz
+install -m 755 ffmpeg-*-amd64-static/ffmpeg ffmpeg-*-amd64-static/ffprobe ~/bin/
+apptainer exec --env PREPEND_PATH=/home/shuang/bin /home/containers/pytorch-vision-h200.sif ffprobe -version
+```
+
+三个 Slurm 脚本已用 Apptainer 的 `PREPEND_PATH` 把 `~/bin` 加到容器的 PATH。若 Hefest 无法下载，可在本机下载同一压缩包后用 MSYS2 `rsync` 传到 `~/downloads/ffmpeg-static/`，再从 `md5sum` 开始执行。
 
 如果 hefest **不能联网**：在本机下载权重，再用 scp 传到 `/data/checkpoints/shuang/cache/`。V-JEPA 2 用的 torch.hub 需要源码仓库加权重文件；VideoMAE 用 HF 格式的目录，下载后通过 `--model-id /path/to/dir` 指定。
 
@@ -58,8 +73,11 @@ apptainer exec --overlay ~/overlay.img $SIF pip install "numpy==1.26.4" "transfo
 ```bash
 cd "/home/shuang/projects/Deepfake Reconstruction/predictability_probe"
 export HF_HOME=/data/checkpoints/shuang/cache/hf TORCH_HOME=/data/checkpoints/shuang/cache/torch
-apptainer exec --nv --overlay ~/overlay.img:ro -B /data $SIF python3 scripts/selftest.py --backend videomae --video <某个mp4>
-apptainer exec --nv --overlay ~/overlay.img:ro -B /data $SIF python3 scripts/selftest.py --backend vjepa2   --video <某个mp4>
+SIF=/home/containers/pytorch-vision-h200.sif
+OVERLAY_ARGS=()
+[ -f ~/overlay.img ] && OVERLAY_ARGS=(--overlay ~/overlay.img:ro)
+apptainer exec --nv "${OVERLAY_ARGS[@]}" --env PREPEND_PATH=/home/shuang/bin -B /data "$SIF" python3 scripts/selftest.py --backend videomae --video /data/datasets/shuang/magic/real/real_videos_mixkit_720p/134.mp4
+apptainer exec --nv "${OVERLAY_ARGS[@]}" --env PREPEND_PATH=/home/shuang/bin -B /data "$SIF" python3 scripts/selftest.py --backend vjepa2   --video /data/datasets/shuang/magic/real/real_videos_mixkit_720p/134.mp4
 ```
 
 检查项：
