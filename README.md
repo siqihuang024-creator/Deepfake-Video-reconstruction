@@ -25,12 +25,10 @@ slurm/*.sbatch              提交作业用的脚本
 ## 一、部署环境（在集群上逐项确认）
 
 ```bash
-# 0) 从本机登录网关，再更新共享 home 上的代码
+# 0) 代码更新从本机 Windows PowerShell 用 scp 传到 hefest。
+#    slurm-datakom 不需要安装 git；具体传哪些文件见各步骤。
+# 1) 从本机登录网关，申请一个交互式 GPU 会话
 ssh slurm-datakom
-cd "/home/shuang/projects/Deepfake Reconstruction/predictability_probe"
-git pull --ff-only origin main
-
-# 1) 申请一个交互式 GPU 会话
 mkdir -p ~/logs        # 只需做一次：Slurm 在作业启动前就要打开日志文件，目录不存在就拿不到日志
 srun --partition=batch --gres=gpu:1 --cpus-per-task=8 --mem=32G --time=01:00:00 --pty bash
 SIF=/home/containers/pytorch-vision-h200.sif
@@ -80,14 +78,17 @@ V-JEPA 2 的 hub 接口是按 `encoder(x, masks=[idx])` 和 `predictor(ctx, ctx_
 
 ```bash
 # Hefest 上已确认的 Magic Videos 根目录：/data/datasets/shuang/magic
-# 从 slurm-datakom 的项目目录提交；先建日志目录供 Slurm 打开输出文件
+# Windows PowerShell：把清单脚本传到共享的 /home/shuang
+scp "E:\PhD\Deepfake Video reconstruction 2026_11_05\predictability_probe\slurm\build_magic_manifest.sbatch" hefest:/home/shuang/
+
+# 在 slurm-datakom 上提交；先建日志目录供 Slurm 打开输出文件
 mkdir -p ~/logs
-sbatch slurm/build_magic_manifest.sbatch
+sbatch ~/build_magic_manifest.sbatch
 ```
 - 清单脚本的每个 `--spec` 对应一个实际子目录。真实视频目录是 `real/real_videos_pexels_720p` 与 `real/real_videos_mixkit_720p`；假视频目录是 `fake/step-video`、`fake/jimeng-S3.0`、`fake/jimeng-S2.0`、`fake/wanx2.1`、`fake/hailuo-T2V-01`、`fake/pexels_wan2.1-T2V-1.3B`。`root=` 必须使用这些实际路径。
 - Hefest 文件名抽样确认：Mixkit 的真实视频与 `step-video`、`jimeng-S3.0`、`jimeng-S2.0`、`wanx2.1`、`hailuo-T2V-01` 使用相同编号（如 `134.mp4`）；Pexels 的真实视频与 `pexels_wan2.1-T2V-1.3B` 使用相同哈希文件名。因此这八个目录都使用 `pair=stem`。脚本会验证每个生成器的配对率，生成后仍须人工打开报告中的配对样例核对。
 - 真实视频默认按 id 哈希对半分成 calib（定阈值）和 test（测试）；未配对的假视频进 test，已配对的假视频跟随对应真实视频的划分。
-- **有配对关系的数据集（CoCoVideo、Magic Videos）一定要加 `pair=...`**：`pair=stem`（文件名相同的就是一对）、`pair=regex:(clip\d+)`、`pair=csv:映射表.csv`。加了以后会**按对来划分**：真实视频和由它生成的假视频总是在同一边；配对的真实视频进了 calib 的那些假视频不参与评估。具体怎么配对，要等拿到数据、看过文件命名规则再定。
+- **有配对关系的数据集一定要加 `pair=...`**：Magic Videos 已按抽样文件名选用 `pair=stem`；CoCoVideo 的规则仍待拿到数据后确定。其他可选规则是 `pair=regex:(clip\d+)` 或 `pair=csv:映射表.csv`。加了以后会**按对来划分**：真实视频和由它生成的假视频总是在同一边；配对的真实视频进了 calib 的那些假视频不参与评估。
   - **配对检查**：如果一个 pair_id 对应多条真实视频，或者某个生成器的配对率低于 `--min-pair-rate`（默认 90%），脚本会**直接报错退出**，不生成清单。找不到对应真实视频的假视频没有 pair_id，一律放进 test 参与评估，不会被丢掉。
   - 脚本会打印每个生成器的配对率，以及 3 组配对示例的路径。**跑探针之前，先人工打开这几组视频确认确实是一对。**
 - 脚本最后会打印**每个生成器的分辨率、帧率、编码器分布**，先看一眼有没有明显的格式差异。
