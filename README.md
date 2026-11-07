@@ -25,8 +25,8 @@ slurm/*.sbatch              提交作业用的脚本
 ## 一、部署环境（在集群上逐项确认）
 
 ```bash
-# 0) 代码更新可从本机 MSYS2 用 rsync 直接传到 hefest。
-#    slurm-datakom 不需要安装 git；具体传哪些文件见各步骤。
+# 0) 本机 MSYS2 用 scp 把代码传到 slurm-datakom 的共享 /home/shuang。
+#    从 datakom 用 Slurm 进入 hefest；不依赖直连 hefest 或 datakom 上的 git。
 # 1) 从本机登录网关，申请一个交互式 GPU 会话
 ssh slurm-datakom
 mkdir -p ~/logs        # 只需做一次：Slurm 在作业启动前就要打开日志文件，目录不存在就拿不到日志
@@ -50,7 +50,7 @@ apptainer exec --overlay ~/overlay.img $SIF pip install "numpy==1.26.4" "transfo
 # 5) ffmpeg/ffprobe 为独立可执行文件；见下方安装步骤，不需要 overlay
 ```
 
-Hefest 的宿主机和容器都没有 `ffmpeg` / `ffprobe`。可以把第三方 Linux 静态版放进个人目录，无须 root 或 overlay。在 Hefest 上执行：
+Hefest 的宿主机和容器都没有 `ffmpeg` / `ffprobe`。可以把第三方 Linux 静态版放进共享的 `/home/shuang/bin`，无须 root、overlay 或 GPU。在 `slurm-datakom` 上执行：
 
 ```bash
 mkdir -p ~/bin ~/downloads/ffmpeg-static
@@ -61,12 +61,19 @@ md5sum -c ffmpeg-release-amd64-static.tar.xz.md5
 # 只有校验显示 OK 后才继续
 tar -xf ffmpeg-release-amd64-static.tar.xz
 install -m 755 ffmpeg-*-amd64-static/ffmpeg ffmpeg-*-amd64-static/ffprobe ~/bin/
-apptainer exec --env PREPEND_PATH=/home/shuang/bin /home/containers/pytorch-vision-h200.sif ffprobe -version
 ```
 
-三个 Slurm 脚本已用 Apptainer 的 `PREPEND_PATH` 把 `~/bin` 加到容器的 PATH。若 Hefest 无法下载，可在本机下载同一压缩包后用 MSYS2 `rsync` 传到 `~/downloads/ffmpeg-static/`，再从 `md5sum` 开始执行。
+再从 datakom 申请一个 CPU 会话，到 Hefest 容器里验证，完成后退出：
 
-如果 hefest **不能联网**：在本机下载权重，再用 scp 传到 `/data/checkpoints/shuang/cache/`。V-JEPA 2 用的 torch.hub 需要源码仓库加权重文件；VideoMAE 用 HF 格式的目录，下载后通过 `--model-id /path/to/dir` 指定。
+```bash
+srun --partition=batch --cpus-per-task=1 --mem=2G --time=0 --pty bash
+apptainer exec --env PREPEND_PATH=/home/shuang/bin /home/containers/pytorch-vision-h200.sif ffprobe -version
+exit
+```
+
+三个 Slurm 脚本已用 Apptainer 的 `PREPEND_PATH` 把 `~/bin` 加到容器的 PATH。若 datakom 无法下载，可在本机下载同一压缩包和校验文件后，用 MSYS2 `scp` 传到 datakom 的 `/home/shuang/downloads/ffmpeg-static/`，再从 `md5sum` 开始执行。
+
+如果 hefest **不能联网**：在本机下载权重，用 `scp` 先传到 datakom 的共享 `/home/shuang/`，再在 Slurm 分配的 Hefest 会话中复制到 `/data/checkpoints/shuang/cache/`。V-JEPA 2 用的 torch.hub 需要源码仓库加权重文件；VideoMAE 用 HF 格式的目录，下载后通过 `--model-id /path/to/dir` 指定。
 
 ## 二、自检（必须全部 PASS 才能跑全量）
 
@@ -96,13 +103,13 @@ V-JEPA 2 的 hub 接口是按 `encoder(x, masks=[idx])` 和 `predictor(ctx, ctx_
 
 ```bash
 # Hefest 上已确认的 Magic Videos 根目录：/data/datasets/shuang/magic
-# 本机 MSYS2，连上 WireGuard 后：按此前成功的方式直连 hefest 的 169 端口。
-# 使用完整主机名，不用 hefest 别名；别名在本机 SSH 配置中会经 slurm-datakom 跳转。
-rsync -avP -s -e "ssh -p 169" \
-  "/e/PhD/Deepfake Video reconstruction 2026_11_05/predictability_probe/slurm/build_magic_manifest.sbatch" \
-  "shuang@hefest.uab.cat:/home/shuang/projects/Deepfake Reconstruction/predictability_probe/slurm/"
+# 本机 MSYS2：先传到 datakom 的共享 home
+scp "/e/PhD/Deepfake Video reconstruction 2026_11_05/predictability_probe/slurm/"*.sbatch \
+  slurm-datakom:/home/shuang/
 
-# 在 slurm-datakom 上提交；先建日志目录供 Slurm 打开输出文件
+# 在 slurm-datakom 上：复制到项目目录后提交
+cp ~/build_magic_manifest.sbatch ~/probe.sbatch ~/standardize.sbatch \
+  "/home/shuang/projects/Deepfake Reconstruction/predictability_probe/slurm/"
 mkdir -p ~/logs
 cd "/home/shuang/projects/Deepfake Reconstruction/predictability_probe"
 sbatch slurm/build_magic_manifest.sbatch
