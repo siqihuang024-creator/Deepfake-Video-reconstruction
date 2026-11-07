@@ -25,7 +25,7 @@ slurm/*.sbatch              提交作业用的脚本
 ## 一、部署环境（在集群上逐项确认）
 
 ```bash
-# 0) 代码更新从本机 Windows PowerShell 用 scp 传到 hefest。
+# 0) 代码更新可从本机 MSYS2 用 rsync 直接传到 hefest。
 #    slurm-datakom 不需要安装 git；具体传哪些文件见各步骤。
 # 1) 从本机登录网关，申请一个交互式 GPU 会话
 ssh slurm-datakom
@@ -78,12 +78,15 @@ V-JEPA 2 的 hub 接口是按 `encoder(x, masks=[idx])` 和 `predictor(ctx, ctx_
 
 ```bash
 # Hefest 上已确认的 Magic Videos 根目录：/data/datasets/shuang/magic
-# Windows PowerShell：把清单脚本传到共享的 /home/shuang
-scp "E:\PhD\Deepfake Video reconstruction 2026_11_05\predictability_probe\slurm\build_magic_manifest.sbatch" hefest:/home/shuang/
+# 本机 MSYS2：用 rsync 直接传到项目目录（-s 可处理远程路径中的空格）
+rsync -avP -s -e "ssh -F /c/Users/HuangSiQi/.ssh/config" \
+  "/e/PhD/Deepfake Video reconstruction 2026_11_05/predictability_probe/slurm/build_magic_manifest.sbatch" \
+  "hefest:/home/shuang/projects/Deepfake Reconstruction/predictability_probe/slurm/"
 
 # 在 slurm-datakom 上提交；先建日志目录供 Slurm 打开输出文件
 mkdir -p ~/logs
-sbatch ~/build_magic_manifest.sbatch
+cd "/home/shuang/projects/Deepfake Reconstruction/predictability_probe"
+sbatch slurm/build_magic_manifest.sbatch
 ```
 - 清单脚本的每个 `--spec` 对应一个实际子目录。真实视频目录是 `real/real_videos_pexels_720p` 与 `real/real_videos_mixkit_720p`；假视频目录是 `fake/step-video`、`fake/jimeng-S3.0`、`fake/jimeng-S2.0`、`fake/wanx2.1`、`fake/hailuo-T2V-01`、`fake/pexels_wan2.1-T2V-1.3B`。`root=` 必须使用这些实际路径。
 - Hefest 文件名抽样确认：Mixkit 的真实视频与 `step-video`、`jimeng-S3.0`、`jimeng-S2.0`、`wanx2.1`、`hailuo-T2V-01` 使用相同编号（如 `134.mp4`）；Pexels 的真实视频与 `pexels_wan2.1-T2V-1.3B` 使用相同哈希文件名。因此这八个目录都使用 `pair=stem`。脚本会验证每个生成器的配对率，生成后仍须人工打开报告中的配对样例核对。
