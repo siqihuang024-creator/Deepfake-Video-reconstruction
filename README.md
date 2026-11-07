@@ -78,10 +78,11 @@ V-JEPA 2 的 hub 接口是按 `encoder(x, masks=[idx])` 和 `predictor(ctx, ctx_
 
 ```bash
 # Hefest 上已确认的 Magic Videos 根目录：/data/datasets/shuang/magic
-# 本机 MSYS2：用 rsync 直接传到项目目录（-s 可处理远程路径中的空格）
-rsync -avP -s -e "ssh -F /c/Users/HuangSiQi/.ssh/config" \
+# 本机 MSYS2，连上 WireGuard 后：按此前成功的方式直连 hefest 的 169 端口。
+# 使用完整主机名，不用 hefest 别名；别名在本机 SSH 配置中会经 slurm-datakom 跳转。
+rsync -avP -s -e "ssh -p 169" \
   "/e/PhD/Deepfake Video reconstruction 2026_11_05/predictability_probe/slurm/build_magic_manifest.sbatch" \
-  "hefest:/home/shuang/projects/Deepfake Reconstruction/predictability_probe/slurm/"
+  "shuang@hefest.uab.cat:/home/shuang/projects/Deepfake Reconstruction/predictability_probe/slurm/"
 
 # 在 slurm-datakom 上提交；先建日志目录供 Slurm 打开输出文件
 mkdir -p ~/logs
